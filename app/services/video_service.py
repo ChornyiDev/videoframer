@@ -10,6 +10,7 @@ import hashlib
 from openai import OpenAI
 from ..core.config import get_settings
 from ..core.redis_client import Cache
+import logging
 
 settings = get_settings()
 
@@ -218,7 +219,8 @@ class VideoProcessor:
 
     def _get_description(self, frames: List[str], transcription: str, system_prompt: Optional[str] = None) -> str:
         """Get video description using OpenAI"""
-        if not system_prompt:
+        
+        if system_prompt is None:
             system_prompt = """As a video Assistant, your goal is to describe a video with a focus on context that will be useful for bloggers, noting details that can be used as ideas for content: Plot, Key points, Atmosphere, Style, Visual look, Gestures, or anything else that could attract attention.
 
 Also describe what exactly is happening in the video: The place depicted, the actions performed by people or objects, their interaction."""
@@ -237,7 +239,7 @@ Also describe what exactly is happening in the video: The place depicted, the ac
                     *[{
                         "type": "image_url",
                         "image_url": {
-                            "url": frame,
+                            "url": f"data:image/jpeg;base64,{frame}",
                             "detail": "low"
                         }
                     } for frame in frames]
@@ -245,12 +247,16 @@ Also describe what exactly is happening in the video: The place depicted, the ac
             }
         ]
 
-        response = self.client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            max_tokens=2048
-        )
-        return response.choices[0].message.content
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                max_tokens=2048
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logging.error(f"Error getting description from OpenAI: {str(e)}")
+            raise Exception(f"Error code: {getattr(e, 'status_code', 'unknown')} - {str(e)}")
 
     def _get_cache_key(self, video_url: str, system_prompt: Optional[str] = None) -> str:
         """Generate unique cache key based on video URL and system prompt"""
