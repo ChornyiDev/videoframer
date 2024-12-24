@@ -86,40 +86,54 @@ class VideoProcessor:
         """Get ffmpeg and ffprobe paths"""
         # Try common locations
         common_paths = [
-            '/usr/bin/',
-            '/usr/local/bin/',
-            '/opt/homebrew/bin/',
-            '/usr/local/opt/ffmpeg/bin/'
+            '/usr/bin',  # Most common on Linux
+            '/usr/local/bin',
+            '/opt/homebrew/bin',
+            '/usr/local/opt/ffmpeg/bin',
+            '/bin',
+            '/snap/bin'  # For Ubuntu with snap
         ]
         
-        ffmpeg_path = None
-        ffprobe_path = None
+        # First try exact paths we know work
+        for path in common_paths:
+            ffmpeg_candidate = os.path.join(path, 'ffmpeg')
+            ffprobe_candidate = os.path.join(path, 'ffprobe')
+            
+            if os.path.exists(ffmpeg_candidate) and os.access(ffmpeg_candidate, os.X_OK) and \
+               os.path.exists(ffprobe_candidate) and os.access(ffprobe_candidate, os.X_OK):
+                print(f"Found ffmpeg at {ffmpeg_candidate} and ffprobe at {ffprobe_candidate}")
+                return ffmpeg_candidate, ffprobe_candidate
         
-        # First try PATH
+        # If exact paths didn't work, try which command
         try:
             ffmpeg_path = subprocess.check_output(['which', 'ffmpeg']).decode().strip()
             ffprobe_path = subprocess.check_output(['which', 'ffprobe']).decode().strip()
-            return ffmpeg_path, ffprobe_path
-        except:
-            # Then try common locations
-            for path in common_paths:
-                if os.path.exists(os.path.join(path, 'ffmpeg')):
-                    ffmpeg_path = os.path.join(path, 'ffmpeg')
-                if os.path.exists(os.path.join(path, 'ffprobe')):
-                    ffprobe_path = os.path.join(path, 'ffprobe')
-                if ffmpeg_path and ffprobe_path:
-                    return ffmpeg_path, ffprobe_path
-            
-            raise Exception("FFmpeg/FFprobe not found. Please install FFmpeg.")
+            if ffmpeg_path and ffprobe_path and \
+               os.path.exists(ffmpeg_path) and os.access(ffmpeg_path, os.X_OK) and \
+               os.path.exists(ffprobe_path) and os.access(ffprobe_path, os.X_OK):
+                print(f"Found ffmpeg at {ffmpeg_path} and ffprobe at {ffprobe_path}")
+                return ffmpeg_path, ffprobe_path
+        except Exception as e:
+            print(f"Error finding ffmpeg in PATH: {e}")
+        
+        # If we get here, we couldn't find the executables
+        error_msg = "FFmpeg/FFprobe not found or not executable. Please install FFmpeg."
+        print(error_msg)
+        raise Exception(error_msg)
 
     def _extract_frames(self, video_path: str, max_frames: int = 8, ffmpeg_path: str = 'ffmpeg') -> List[str]:
         """Extract frames and return list of base64 encoded images"""
-        # Get video duration
+        # Get video duration using ffprobe path
+        ffmpeg_path, ffprobe_path = self._get_ffmpeg_path()  # Get both paths
         duration_cmd = [
-            'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+            ffprobe_path, '-v', 'error', '-show_entries', 'format=duration',
             '-of', 'default=noprint_wrappers=1:nokey=1', video_path
         ]
-        duration = float(subprocess.check_output(duration_cmd).decode('utf-8').strip())
+        try:
+            duration = float(subprocess.check_output(duration_cmd, stderr=subprocess.PIPE).decode('utf-8').strip())
+        except subprocess.CalledProcessError as e:
+            print(f"Error getting duration: {e.stderr.decode()}")
+            raise Exception(f"Failed to get video duration: {e.stderr.decode()}")
         
         # Calculate frame interval
         if duration <= 30:
@@ -140,38 +154,55 @@ class VideoProcessor:
             if timestamp >= duration:
                 break
                 
-            # Extract frame
+            # Extract frame using ffmpeg path
             frame_path = os.path.join(self.temp_dir, f'frame_{i}.jpg')
             extract_cmd = [
                 ffmpeg_path, '-ss', str(timestamp), '-i', video_path,
                 '-vframes', '1', '-q:v', '2', frame_path
             ]
-            subprocess.run(extract_cmd, check=True, capture_output=True)
+            try:
+                subprocess.run(extract_cmd, check=True, capture_output=True, stderr=subprocess.PIPE)
+            except subprocess.CalledProcessError as e:
+                print(f"Error extracting frame: {e.stderr.decode()}")
+                raise Exception(f"Failed to extract frame: {e.stderr.decode()}")
             
             # Convert to base64
-            with Image.open(frame_path) as img:
-                # Resize if needed
-                if img.size[0] > 800 or img.size[1] > 800:
-                    img.thumbnail((800, 800))
-                    
-                # Convert to JPEG and optimize
-                buffer = io.BytesIO()
-                img.save(buffer, format='JPEG', quality=70, optimize=True)
-                img_str = base64.b64encode(buffer.getvalue()).decode()
-                frames.append(img_str)
-                
-            # Cleanup frame
-            os.remove(frame_path)
+            try:
+                with Image.open(frame_path) as img:
+                    # Resize if needed
+                    if img.size[0] > 800 or img.size[1] > 800:
+                        img.thumbnail((800, 800))
+                        
+                    # Convert to JPEG and optimize
+                    buffer = io.BytesIO()
+                    img.save(buffer, format='JPEG', quality=70, optimize=True)
+                    img_str = base64.b64encode(buffer.getvalue()).decode()
+                    frames.append(img_str)
+            except Exception as e:
+                print(f"Error processing frame: {e}")
+                raise
+            finally:
+                # Cleanup frame
+                if os.path.exists(frame_path):
+                    try:
+                        os.remove(frame_path)
+                    except Exception as e:
+                        print(f"Error removing frame: {e}")
             
         return frames
 
     def _extract_audio(self, video_path: str, ffmpeg_path: str = 'ffmpeg') -> str:
         """Extract audio and return path"""
+        ffmpeg_path, _ = self._get_ffmpeg_path()  # Get ffmpeg path
         audio_path = os.path.join(self.temp_dir, 'audio.mp3')
         extract_cmd = [
             ffmpeg_path, '-i', video_path, '-q:a', '0', '-map', 'a', audio_path
         ]
-        subprocess.run(extract_cmd, check=True, capture_output=True)
+        try:
+            subprocess.run(extract_cmd, check=True, capture_output=True, stderr=subprocess.PIPE)
+        except subprocess.CalledProcessError as e:
+            print(f"Error extracting audio: {e.stderr.decode()}")
+            raise Exception(f"Failed to extract audio: {e.stderr.decode()}")
         return audio_path
 
     def _get_transcription(self, audio_path: str) -> str:
