@@ -30,89 +30,117 @@ uvicorn app.main:app --reload
 
 Запускає обробку відео.
 
-**Запит:**
-```bash
-curl -X POST "http://localhost:8000/process" \
-     -H "Content-Type: application/json" \
-     -d '{
-           "video_url": "https://example.com/video.mp4",
-           "system_prompt": "Analyze this video for social media content"
-         }'
-```
+#### Request Body
 
-**Відповідь:**
 ```json
 {
-    "status": "processing",
-    "task_id": "3d942ae3-5ff3-4769-b6ea-d9debf6b6c9a",
-    "message": "Video processing started. Results will be sent to webhook."
+    "video_url": "https://example.com/video.mp4",
+    "system_prompt": "Optional custom prompt for video description",
+    "metadata": {
+        "Post Rec ID": "rec203Zwfn0lV9u7G",
+        "Config Rec ID": "recEMgrOdYxMK5UvP",
+        "User Rec ID": "rec7q2YUCwU4aZn29"
+    }
+}
+```
+
+| Поле | Тип | Опис |
+|------|-----|------|
+| video_url | string | URL відео для обробки |
+| system_prompt | string | (Опціонально) Кастомний промпт для опису відео |
+| metadata | object | (Опціонально) Додаткові параметри, які будуть передані у вебхук |
+
+#### Response
+
+```json
+{
+    "task_id": "8b2c7b9a-1234-5678-90ab-cdef12345678",
+    "status": "Processing started"
+}
+```
+
+### Webhook Response
+
+Після обробки відео, результат буде відправлено на вказаний webhook URL з наступною структурою:
+
+```json
+{
+    "frames": [
+        {
+            "timestamp": "00:00:05",
+            "description": "Description of the frame"
+        }
+    ],
+    "transcription": "Full video transcription...",
+    "description": "Complete video description",
+    "Post Rec ID": "rec203Zwfn0lV9u7G",
+    "Config Rec ID": "recEMgrOdYxMK5UvP",
+    "User Rec ID": "rec7q2YUCwU4aZn29"
 }
 ```
 
 ### GET /health
 
-Перевіряє статус сервісу.
+Перевірка статусу сервісу.
 
-```bash
-curl "http://localhost:8000/health"
-```
-
-## Формат вебхук відповіді
+#### Response
 
 ```json
 {
-    "status": "success",
-    "transcription": "Повний текст транскрипції...",
-    "description": "Детальний опис відео...",
-    "word_count": 98
+    "status": "healthy"
 }
 ```
 
 ## Приклади використання
 
-### 1. Обробка короткого відео
+### cURL
 
 ```bash
 curl -X POST "http://localhost:8000/process" \
      -H "Content-Type: application/json" \
      -d '{
-           "video_url": "https://example.com/short-video.mp4"
-         }'
+         "video_url": "https://storage.magicboxpremium.com/preview/result_20241220_072759_f1cb62ca.mp4",
+         "metadata": {
+             "Post Rec ID": "rec203Zwfn0lV9u7G",
+             "Config Rec ID": "recEMgrOdYxMK5UvP",
+             "User Rec ID": "rec7q2YUCwU4aZn29"
+         }
+     }'
 ```
 
-### 2. Обробка з кастомним промптом
+### Python
 
-```bash
-curl -X POST "http://localhost:8000/process" \
-     -H "Content-Type: application/json" \
-     -d '{
-           "video_url": "https://example.com/video.mp4",
-           "system_prompt": "Analyze this video focusing on technical tutorials and educational content"
-         }'
+```python
+import requests
+
+url = "http://localhost:8000/process"
+data = {
+    "video_url": "https://storage.magicboxpremium.com/preview/result_20241220_072759_f1cb62ca.mp4",
+    "metadata": {
+        "Post Rec ID": "rec203Zwfn0lV9u7G",
+        "Config Rec ID": "recEMgrOdYxMK5UvP",
+        "User Rec ID": "rec7q2YUCwU4aZn29"
+    }
+}
+
+response = requests.post(url, json=data)
+print(response.json())
 ```
 
-### 3. Обробка відео для соціальних мереж
+## Обробка помилок
 
-```bash
-curl -X POST "http://localhost:8000/process" \
-     -H "Content-Type: application/json" \
-     -d '{
-           "video_url": "https://example.com/social-video.mp4",
-           "system_prompt": "Create engaging social media content with hashtags and key points"
-         }'
-```
+Сервіс повертає наступні HTTP коди помилок:
 
-## Обмеження та вимоги
+- 400: Неправильний формат запиту
+- 404: Відео не знайдено
+- 413: Розмір відео перевищує ліміт
+- 500: Внутрішня помилка сервера
 
-1. **Формати відео:**
-   - MP4
-   - QuickTime
-   - AVI
+## Обмеження
 
-2. **Обмеження:**
-   - Максимальний розмір: 50MB
-   - Максимальна кількість кадрів: 8
-   - Таймаут завдання: 2 хвилини
+- Максимальний розмір відео: 50MB
+- Підтримувані формати: MP4, MOV, AVI, WMV
+- Максимальний час обробки: 2 хвилини
 
 ## Налаштування через змінні оточення
 
@@ -136,7 +164,7 @@ ENABLE_GZIP=true
    - Стисніть відео перед завантаженням
 
 2. **"Invalid video format"**
-   - Використовуйте підтримувані формати (MP4, QuickTime, AVI)
+   - Використовуйте підтримувані формати (MP4, MOV, AVI, WMV)
    - Конвертуйте відео в підтримуваний формат
 
 3. **"Task timeout"**
