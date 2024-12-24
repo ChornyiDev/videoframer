@@ -6,22 +6,20 @@ VideoFramer - це сервіс для обробки відео, який ав�
 
 1. Клонуйте репозиторій:
 ```bash
-git clone https://github.com/yourusername/videoframer.git
+cd /root/Scripts
+git clone https://github.com/ChornyiDev/videoframer.git
 cd videoframer
 ```
 
 2. Створіть віртуальне середовище та встановіть залежності:
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # для Linux/Mac
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
 3. Встановіть FFmpeg:
 ```bash
-# Mac
-brew install ffmpeg
-
 # Ubuntu
 sudo apt-get update
 sudo apt-get install ffmpeg
@@ -34,22 +32,97 @@ REDIS_URL=redis://localhost:6379
 WEBHOOK_URL=your-webhook-url
 ```
 
-5. Запустіть Redis:
+## Налаштування системного сервісу
+
+1. Створіть файл сервісу для FastAPI:
 ```bash
-redis-server
+sudo nano /etc/systemd/system/videoframer.service
 ```
 
-6. Запустіть Celery worker:
-```bash
-celery -A celery_worker.celery_app worker --loglevel=info
+Додайте наступний конфіг:
+```ini
+[Unit]
+Description=VideoFramer FastAPI Service
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/root/Scripts/videoframer
+Environment="PATH=/root/Scripts/videoframer/.venv/bin"
+EnvironmentFile=/root/Scripts/videoframer/.env
+ExecStart=/root/Scripts/videoframer/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
 ```
 
-7. Запустіть FastAPI сервер:
+2. Створіть файл сервісу для Celery:
 ```bash
-uvicorn app.main:app --reload
+sudo nano /etc/systemd/system/videoframer-worker.service
 ```
 
-Сервіс буде доступний за адресою: http://localhost:8000
+Додайте наступний конфіг:
+```ini
+[Unit]
+Description=VideoFramer Celery Worker
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/root/Scripts/videoframer
+Environment="PATH=/root/Scripts/videoframer/.venv/bin"
+EnvironmentFile=/root/Scripts/videoframer/.env
+ExecStart=/root/Scripts/videoframer/.venv/bin/celery -A celery_worker.celery_app worker --loglevel=info
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+3. Активуйте та запустіть сервіси:
+```bash
+# Перезавантажте systemd
+sudo systemctl daemon-reload
+
+# Активуйте сервіси
+sudo systemctl enable videoframer
+sudo systemctl enable videoframer-worker
+
+# Запустіть сервіси
+sudo systemctl start videoframer
+sudo systemctl start videoframer-worker
+```
+
+4. Перевірте статус сервісів:
+```bash
+sudo systemctl status videoframer
+sudo systemctl status videoframer-worker
+```
+
+5. Перегляд логів:
+```bash
+# Для FastAPI
+sudo journalctl -u videoframer -f
+
+# Для Celery
+sudo journalctl -u videoframer-worker -f
+```
+
+## Корисні команди для управління сервісом
+
+```bash
+# Перезапуск сервісів
+sudo systemctl restart videoframer
+sudo systemctl restart videoframer-worker
+
+# Зупинка сервісів
+sudo systemctl stop videoframer
+sudo systemctl stop videoframer-worker
+
+# Перевірка статусу Redis
+sudo systemctl status redis
+```
 
 ## Функціональність
 
