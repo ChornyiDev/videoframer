@@ -130,10 +130,13 @@ class VideoProcessor:
             '-of', 'default=noprint_wrappers=1:nokey=1', video_path
         ]
         try:
-            duration = float(subprocess.check_output(duration_cmd, stderr=subprocess.PIPE).decode('utf-8').strip())
+            result = subprocess.run(duration_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise Exception(f"Failed to get video duration: {result.stderr}")
+            duration = float(result.stdout.strip())
         except subprocess.CalledProcessError as e:
-            print(f"Error getting duration: {e.stderr.decode()}")
-            raise Exception(f"Failed to get video duration: {e.stderr.decode()}")
+            print(f"Error getting duration: {e.stderr}")
+            raise Exception(f"Failed to get video duration: {e.stderr}")
         
         # Calculate frame interval
         if duration <= 30:
@@ -161,10 +164,12 @@ class VideoProcessor:
                 '-vframes', '1', '-q:v', '2', frame_path
             ]
             try:
-                subprocess.run(extract_cmd, check=True, capture_output=True, stderr=subprocess.PIPE)
+                result = subprocess.run(extract_cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    raise Exception(f"Failed to extract frame: {result.stderr}")
             except subprocess.CalledProcessError as e:
-                print(f"Error extracting frame: {e.stderr.decode()}")
-                raise Exception(f"Failed to extract frame: {e.stderr.decode()}")
+                print(f"Error extracting frame: {e.stderr}")
+                raise Exception(f"Failed to extract frame: {e.stderr}")
             
             # Convert to base64
             try:
@@ -199,10 +204,12 @@ class VideoProcessor:
             ffmpeg_path, '-i', video_path, '-q:a', '0', '-map', 'a', audio_path
         ]
         try:
-            subprocess.run(extract_cmd, check=True, capture_output=True, stderr=subprocess.PIPE)
+            result = subprocess.run(extract_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise Exception(f"Failed to extract audio: {result.stderr}")
         except subprocess.CalledProcessError as e:
-            print(f"Error extracting audio: {e.stderr.decode()}")
-            raise Exception(f"Failed to extract audio: {e.stderr.decode()}")
+            print(f"Error extracting audio: {e.stderr}")
+            raise Exception(f"Failed to extract audio: {e.stderr}")
         return audio_path
 
     def _get_transcription(self, audio_path: str) -> str:
@@ -288,7 +295,14 @@ Also describe what exactly is happening in the video: The place depicted, the ac
                 ffprobe_path, '-v', 'error', '-show_entries', 'format=duration',
                 '-of', 'default=noprint_wrappers=1:nokey=1', video_path
             ]
-            duration = float(subprocess.check_output(duration_cmd).decode('utf-8').strip())
+            try:
+                result = subprocess.run(duration_cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    raise Exception(f"Failed to get video duration: {result.stderr}")
+                duration = float(result.stdout.strip())
+            except subprocess.CalledProcessError as e:
+                print(f"Error getting duration: {e.stderr}")
+                raise Exception(f"Failed to get video duration: {e.stderr}")
             
             if duration < settings.MIN_DURATION:
                 result = {
