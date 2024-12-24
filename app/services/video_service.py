@@ -22,10 +22,16 @@ class VideoProcessor:
     def _cleanup(self, *files):
         """Clean up temporary files"""
         for file in files:
-            if os.path.exists(file):
-                os.remove(file)
-        if os.path.exists(self.temp_dir):
-            os.rmdir(self.temp_dir)
+            try:
+                if file and os.path.exists(file):
+                    os.remove(file)
+            except Exception as e:
+                print(f"Error removing file {file}: {e}")
+        try:
+            if os.path.exists(self.temp_dir):
+                os.rmdir(self.temp_dir)
+        except Exception as e:
+            print(f"Error removing temp dir {self.temp_dir}: {e}")
 
     def _validate_video(self, url: str) -> tuple[bool, str]:
         """Validate video before downloading"""
@@ -192,12 +198,20 @@ Also describe what exactly is happening in the video: The place depicted, the ac
         return f"video_processing:{hashlib.md5(key_data.encode()).hexdigest()}"
 
     def process_video(self, video_url: str, system_prompt: Optional[str] = None) -> Dict:
-        """Main processing function"""
+        """Process video and return results"""
         video_path = None
         audio_path = None
         
         try:
-            # Check cache if enabled
+            # Validate video first
+            is_valid, error = self._validate_video(video_url)
+            if not is_valid:
+                return {
+                    'status': 'error',
+                    'message': error
+                }
+
+            # Check cache first
             if settings.CACHE_ENABLED:
                 cache_key = self._get_cache_key(video_url, system_prompt)
                 cached_result = self.cache.get(cache_key)
@@ -259,6 +273,13 @@ Also describe what exactly is happening in the video: The place depicted, the ac
                 'message': str(e)
             }
         finally:
-            # Cleanup only if files were created
-            if video_path or audio_path:
-                self._cleanup(video_path, audio_path)
+            # Cleanup temporary files if they exist
+            try:
+                if video_path:
+                    self._cleanup(video_path)
+                if audio_path:
+                    self._cleanup(audio_path)
+                if os.path.exists(self.temp_dir):
+                    os.rmdir(self.temp_dir)
+            except Exception as cleanup_error:
+                print(f"Error during cleanup: {cleanup_error}")
