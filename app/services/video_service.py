@@ -82,10 +82,38 @@ class VideoProcessor:
                             
         return video_path
 
-    def _extract_frames(self, video_path: str, max_frames: int = 8) -> List[str]:
-        """Extract frames and return list of base64 encoded images"""
-        settings = get_settings()
+    def _get_ffmpeg_path(self) -> tuple[str, str]:
+        """Get ffmpeg and ffprobe paths"""
+        # Try common locations
+        common_paths = [
+            '/usr/bin/',
+            '/usr/local/bin/',
+            '/opt/homebrew/bin/',
+            '/usr/local/opt/ffmpeg/bin/'
+        ]
         
+        ffmpeg_path = None
+        ffprobe_path = None
+        
+        # First try PATH
+        try:
+            ffmpeg_path = subprocess.check_output(['which', 'ffmpeg']).decode().strip()
+            ffprobe_path = subprocess.check_output(['which', 'ffprobe']).decode().strip()
+            return ffmpeg_path, ffprobe_path
+        except:
+            # Then try common locations
+            for path in common_paths:
+                if os.path.exists(os.path.join(path, 'ffmpeg')):
+                    ffmpeg_path = os.path.join(path, 'ffmpeg')
+                if os.path.exists(os.path.join(path, 'ffprobe')):
+                    ffprobe_path = os.path.join(path, 'ffprobe')
+                if ffmpeg_path and ffprobe_path:
+                    return ffmpeg_path, ffprobe_path
+            
+            raise Exception("FFmpeg/FFprobe not found. Please install FFmpeg.")
+
+    def _extract_frames(self, video_path: str, max_frames: int = 8, ffmpeg_path: str = 'ffmpeg') -> List[str]:
+        """Extract frames and return list of base64 encoded images"""
         # Get video duration
         duration_cmd = [
             'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
@@ -93,57 +121,57 @@ class VideoProcessor:
         ]
         duration = float(subprocess.check_output(duration_cmd).decode('utf-8').strip())
         
-        # Calculate interval based on video duration
-        if duration <= settings.SHORT_VIDEO_THRESHOLD:
-            interval = settings.SHORT_VIDEO_INTERVAL
-        elif duration <= settings.MEDIUM_VIDEO_THRESHOLD:
-            interval = settings.MEDIUM_VIDEO_INTERVAL
+        # Calculate frame interval
+        if duration <= 30:
+            interval = 5
+        elif duration <= 60:
+            interval = 10
         else:
-            interval = settings.LONG_VIDEO_INTERVAL
-        
-        # Extract frames
-        frames_path = os.path.join(self.temp_dir, 'frame_%04d.jpg')
-        frame_cmd = [
-            'ffmpeg', '-i', video_path, '-vf', f'fps=1/{interval}',
-            '-q:v', '2', '-frames:v', str(max_frames), frames_path
-        ]
-        subprocess.run(frame_cmd, check=True)
-
-        # Convert frames to base64
+            interval = 20
+            
+        # Calculate number of frames
+        num_frames = min(max_frames, int(duration / interval))
+        if num_frames == 0:
+            num_frames = 1
+            
         frames = []
-        for i in range(max_frames):
-            frame_path = os.path.join(self.temp_dir, f'frame_{i+1:04d}.jpg')
-            if not os.path.exists(frame_path):
+        for i in range(num_frames):
+            timestamp = i * interval
+            if timestamp >= duration:
                 break
                 
-            with Image.open(frame_path) as img:
-                # Resize image if too large
-                if max(img.size) > settings.MAX_IMAGE_SIZE:
-                    ratio = settings.MAX_IMAGE_SIZE / max(img.size)
-                    new_size = tuple(int(dim * ratio) for dim in img.size)
-                    img = img.resize(new_size, Image.Resampling.LANCZOS)
-                
-                # Convert to base64
-                buffer = io.BytesIO()
-                img.save(buffer, format='JPEG', quality=settings.JPEG_QUALITY)
-                img_base64 = base64.b64encode(buffer.getvalue()).decode()
-                frames.append(f"data:image/jpeg;base64,{img_base64}")
+            # Extract frame
+            frame_path = os.path.join(self.temp_dir, f'frame_{i}.jpg')
+            extract_cmd = [
+                ffmpeg_path, '-ss', str(timestamp), '-i', video_path,
+                '-vframes', '1', '-q:v', '2', frame_path
+            ]
+            subprocess.run(extract_cmd, check=True, capture_output=True)
             
+            # Convert to base64
+            with Image.open(frame_path) as img:
+                # Resize if needed
+                if img.size[0] > 800 or img.size[1] > 800:
+                    img.thumbnail((800, 800))
+                    
+                # Convert to JPEG and optimize
+                buffer = io.BytesIO()
+                img.save(buffer, format='JPEG', quality=70, optimize=True)
+                img_str = base64.b64encode(buffer.getvalue()).decode()
+                frames.append(img_str)
+                
+            # Cleanup frame
             os.remove(frame_path)
             
         return frames
 
-    def _extract_audio(self, video_path: str) -> str:
+    def _extract_audio(self, video_path: str, ffmpeg_path: str = 'ffmpeg') -> str:
         """Extract audio and return path"""
         audio_path = os.path.join(self.temp_dir, 'audio.mp3')
-        audio_cmd = [
-            'ffmpeg', '-i', video_path,
-            '-ac', '1',  # Convert to mono
-            '-c:a', 'libmp3lame',
-            '-b:a', '48k',  # Set bitrate to 48k
-            audio_path
+        extract_cmd = [
+            ffmpeg_path, '-i', video_path, '-q:a', '0', '-map', 'a', audio_path
         ]
-        subprocess.run(audio_cmd, check=True)
+        subprocess.run(extract_cmd, check=True, capture_output=True)
         return audio_path
 
     def _get_transcription(self, audio_path: str) -> str:
@@ -203,6 +231,9 @@ Also describe what exactly is happening in the video: The place depicted, the ac
         audio_path = None
         
         try:
+            # Get FFmpeg paths
+            ffmpeg_path, ffprobe_path = self._get_ffmpeg_path()
+            
             # Validate video first
             is_valid, error = self._validate_video(video_url)
             if not is_valid:
@@ -223,7 +254,7 @@ Also describe what exactly is happening in the video: The place depicted, the ac
             
             # Get video duration
             duration_cmd = [
-                'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                ffprobe_path, '-v', 'error', '-show_entries', 'format=duration',
                 '-of', 'default=noprint_wrappers=1:nokey=1', video_path
             ]
             duration = float(subprocess.check_output(duration_cmd).decode('utf-8').strip())
@@ -235,9 +266,9 @@ Also describe what exactly is happening in the video: The place depicted, the ac
                 }
                 return result
 
-            # Extract frames and audio
-            frames = self._extract_frames(video_path, settings.MAX_FRAMES)
-            audio_path = self._extract_audio(video_path)
+            # Extract frames and audio using full paths
+            frames = self._extract_frames(video_path, settings.MAX_FRAMES, ffmpeg_path)
+            audio_path = self._extract_audio(video_path, ffmpeg_path)
             
             # Get transcription
             transcription = self._get_transcription(audio_path)
