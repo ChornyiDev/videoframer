@@ -18,18 +18,62 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-3. Встановіть FFmpeg:
+3. Встановіть FFmpeg та Redis:
 ```bash
-# Ubuntu
+# Встановлення FFmpeg
 sudo apt-get update
 sudo apt-get install ffmpeg
+
+# Встановлення Redis
+sudo apt-get install redis-server
+
+# Налаштування Redis для автозапуску
+sudo systemctl enable redis-server
+sudo systemctl start redis-server
+
+# Перевірка статусу Redis
+sudo systemctl status redis-server
 ```
 
-4. Створіть файл .env з необхідними змінними оточення:
+4. Налаштуйте Redis:
+```bash
+# Відкрийте конфіг Redis
+sudo nano /etc/redis/redis.conf
+```
+
+Важливі налаштування в redis.conf:
+```conf
+# Прослуховування всіх інтерфейсів (за замовчуванням тільки localhost)
+bind 0.0.0.0
+
+# Порт (за замовчуванням 6379)
+port 6379
+
+# Налаштування пам'яті (приклад: 256MB)
+maxmemory 256mb
+maxmemory-policy allkeys-lru
+
+# Налаштування персистентності
+save 900 1
+save 300 10
+save 60 10000
+```
+
+Після зміни конфігурації перезапустіть Redis:
+```bash
+sudo systemctl restart redis-server
+```
+
+5. Створіть файл .env з необхідними змінними оточення:
 ```env
 OPENAI_API_KEY=your-api-key
 REDIS_URL=redis://localhost:6379
 WEBHOOK_URL=your-webhook-url
+
+# Optional settings
+CACHE_ENABLED=true
+ENABLE_GZIP=false
+MAX_VIDEO_SIZE=52428800  # 50MB in bytes
 ```
 
 ## Налаштування системного сервісу
